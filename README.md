@@ -141,6 +141,16 @@ kajabi products                                   # List products
 - **Session store:** `~/.kajabi-cli/session.json`
 - **Playwright:** used only for session refresh (headed browser to bypass Cloudflare bot detection)
 
+## Using with Claude Code / Cowork
+
+Most commands work anywhere Claude Code runs. The exception is the auth flow: `kajabi setup` and session refresh open a headed Chromium browser for login + 2FA, which requires a display.
+
+- **Claude Code CLI / Desktop app (local):** fully supported — the browser opens on your machine as normal
+- **Claude Desktop Cowork tab:** fully supported — Dispatch-spawned Code sessions run locally
+- **Remote or headless environments:** auth will fail (no display for the browser). Run `kajabi setup` locally first to cache the session, then use the cached token in remote environments
+
+Once authenticated, the token is cached for ~24 hours. Most commands don't need the browser at all during that window.
+
 ## Troubleshooting
 
 **"kajabi-cli is not configured yet"** — run `kajabi setup`
