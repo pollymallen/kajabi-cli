@@ -72,7 +72,18 @@ export async function refreshSession(sessionPath = SESSION_PATH) {
     const context = await browser.newContext(contextOptions);
     const page = await context.newPage();
 
-    // Navigate directly to the site dashboard (not /admin, which is broken)
+    // Set up JWT interceptor before any navigation so we catch API calls
+    // that fire during the initial page load.
+    let interceptedToken = null;
+    page.on('request', (req) => {
+      if (interceptedToken) return;
+      const auth = req.headers()['authorization'];
+      if (auth && auth.startsWith('eyJ')) {
+        interceptedToken = auth;
+      }
+    });
+
+    // Navigate to the site dashboard
     console.log('  Refreshing Kajabi session...');
     await page.goto(`${KAJABI_BASE}/admin/sites/${getSiteId()}`, {
       waitUntil: 'domcontentloaded',
@@ -92,9 +103,8 @@ export async function refreshSession(sessionPath = SESSION_PATH) {
       console.log('  Please log in with email, password, and 2FA in the browser.');
       console.log(`  Timeout: ${LOGIN_TIMEOUT_MS / 1000} seconds\n`);
 
-      // Poll page.url() instead of waitForURL — the Auth0 → Cloudflare → Kajabi
-      // redirect chain can return HTTP error codes that cause waitForURL to throw
-      // before the final URL is reached.
+      // Poll page.url() — waitForURL throws on intermediate HTTP errors in the
+      // Auth0 → Cloudflare → Kajabi redirect chain.
       const deadline = Date.now() + LOGIN_TIMEOUT_MS;
       while (!page.url().includes('/admin')) {
         if (Date.now() >= deadline) {
@@ -102,31 +112,20 @@ export async function refreshSession(sessionPath = SESSION_PATH) {
         }
         await page.waitForTimeout(1000);
       }
-      await page.waitForTimeout(3000);
+      await page.waitForTimeout(2000);
       console.log('  Login successful!');
+
+      // Navigate to a content page to trigger SPA API calls for JWT capture
+      await page.goto(`${KAJABI_BASE}/admin/sites/${getSiteId()}/email_campaigns`, {
+        waitUntil: 'domcontentloaded',
+        timeout: 15000,
+      }).catch(() => {});
     }
 
     // Capture fresh JWT — two methods:
-    // 1. Intercept authorization header from SPA API calls
+    // 1. Intercepted authorization header from SPA API calls (interceptor above)
     // 2. window.validationToken (set by SPA JS after page load)
     console.log('  Capturing JWT...');
-
-    // Set up request interceptor
-    let interceptedToken = null;
-    page.on('request', (req) => {
-      if (interceptedToken) return;
-      const auth = req.headers()['authorization'];
-      if (auth && auth.startsWith('eyJ')) {
-        interceptedToken = auth;
-      }
-    });
-
-    // Navigate explicitly to the site dashboard to ensure the SPA loads and
-    // makes API calls (which lets us intercept the JWT).
-    await page.goto(`${KAJABI_BASE}/admin/sites/${getSiteId()}/dashboard`, {
-      waitUntil: 'domcontentloaded',
-      timeout: 15000,
-    }).catch(() => {});
     await page.waitForTimeout(5000);
 
     // Check window.validationToken
