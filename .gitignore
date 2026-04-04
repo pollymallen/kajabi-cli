@@ -1,0 +1,16 @@
+node_modules/
+
+# Research/discovery artifacts — not part of the public project
+docs/
+
+# Auth / session — never commit credentials
+~/.kajabi-cli/
+.kajabi-session.json
+.env
+
+# Internal planning files
+PLAN.md
+SESSION-LOG.md
+
+# macOS
+.DS_Store

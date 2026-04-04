@@ -1,0 +1,26 @@
+{
+  "name": "kajabi-cli",
+  "version": "0.1.0",
+  "description": "Unofficial Kajabi CLI — reverse-engineered internal API client",
+  "type": "module",
+  "bin": {
+    "kajabi": "./bin/kajabi.js"
+  },
+  "scripts": {
+    "intercept": "node scripts/api-interceptor.js",
+    "test": "echo \"No tests yet\" && exit 0"
+  },
+  "keywords": [
+    "kajabi",
+    "cli",
+    "api"
+  ],
+  "author": "Polly Allen",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "playwright": "^1.58.2"
+  }
+}
