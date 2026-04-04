@@ -22,20 +22,44 @@
  */
 
 import readline from 'readline';
+import { createRequire } from 'module';
 import { getToken, loadSession, buildCookieHeader } from '../src/lib/auth.js';
 import { KajabiClient } from '../src/lib/client.js';
 import { refreshSession, isSessionFresh } from '../src/lib/session.js';
 import { showConfig, saveConfig, getConfig } from '../src/lib/config.js';
 
+const require = createRequire(import.meta.url);
+const { version } = require('../package.json');
+
+// Short flag → long flag mapping (value flags take the next argument as their value)
+const SHORT_FLAGS = {
+  '-s': 'start',
+  '-e': 'end',
+  '-o': 'output',
+  '-p': 'page',
+  '-h': 'help',
+  '-V': 'version',
+};
+const SHORT_FLAGS_BOOLEAN = new Set(['-h', '-V']);
+
 function parseArgs() {
   const args = { _: [] };
-  for (const arg of process.argv.slice(2)) {
+  const argv = process.argv.slice(2);
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
     if (arg.startsWith('--')) {
       const eqIndex = arg.indexOf('=');
       if (eqIndex > -1) {
         args[arg.slice(2, eqIndex)] = arg.slice(eqIndex + 1);
       } else {
         args[arg.slice(2)] = true;
+      }
+    } else if (SHORT_FLAGS[arg]) {
+      const key = SHORT_FLAGS[arg];
+      if (SHORT_FLAGS_BOOLEAN.has(arg)) {
+        args[key] = true;
+      } else {
+        args[key] = argv[++i]; // consume next arg as value
       }
     } else {
       args._.push(arg);
@@ -598,6 +622,11 @@ async function main() {
   const args = parseArgs();
   const command = args._[0];
 
+  if (args.version) {
+    console.log(`kajabi-cli v${version}`);
+    return;
+  }
+
   if (!command || args.help) {
     console.log(`kajabi-cli — Unofficial Kajabi CLI
 
@@ -639,12 +668,14 @@ Commands:
                    (--site-id=XXXXXXX --email=you@example.com)
 
 Options:
-  --start=YYYY-MM-DD   Start date for reports (default: 30 days ago)
-  --end=YYYY-MM-DD     End date for reports (default: today)
-  --csv                Output as CSV instead of JSON
-  --output=FILE        Write CSV to file instead of stdout
-  --all                Fetch all pages (transactions, contacts, emails)
-  --help               Show this help`);
+  -s, --start=YYYY-MM-DD   Start date for reports (default: 30 days ago)
+  -e, --end=YYYY-MM-DD     End date for reports (default: today)
+  -o, --output=FILE        Write CSV to file instead of stdout
+  -p, --page=N             Page number
+      --csv                Output as CSV instead of JSON
+      --all                Fetch all pages (transactions, contacts, emails)
+  -h, --help               Show this help
+  -V, --version            Show version`);
     return;
   }
 

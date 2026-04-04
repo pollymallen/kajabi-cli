@@ -10,6 +10,10 @@
     "intercept": "node scripts/api-interceptor.js",
     "test": "echo \"No tests yet\" && exit 0"
   },
+  "files": [
+    "bin",
+    "src"
+  ],
   "keywords": [
     "kajabi",
     "cli",
