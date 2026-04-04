@@ -121,9 +121,12 @@ export async function refreshSession(sessionPath = SESSION_PATH) {
       }
     });
 
-    // We're already on the dashboard — just reload to trigger API calls
-    // (Avoids a second page.goto which can fail with HTTP errors)
-    await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+    // Navigate explicitly to the site dashboard to ensure the SPA loads and
+    // makes API calls (which lets us intercept the JWT).
+    await page.goto(`${KAJABI_BASE}/admin/sites/${getSiteId()}/dashboard`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 15000,
+    }).catch(() => {});
     await page.waitForTimeout(5000);
 
     // Check window.validationToken
