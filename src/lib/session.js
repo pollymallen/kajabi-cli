@@ -85,7 +85,7 @@ export async function refreshSession(sessionPath = SESSION_PATH) {
 
     // Navigate to the site dashboard
     console.log('  Refreshing Kajabi session...');
-    await page.goto(`${KAJABI_BASE}/admin/sites/${getSiteId()}`, {
+    await page.goto(`${KAJABI_BASE}/admin/sites/${getSiteId()}/dashboard`, {
       waitUntil: 'domcontentloaded',
       timeout: 15000,
     }).catch(() => {});
