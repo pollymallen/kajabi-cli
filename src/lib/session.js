@@ -92,7 +92,7 @@ export async function refreshSession(sessionPath = SESSION_PATH) {
       console.log('  Please log in with email, password, and 2FA in the browser.');
       console.log(`  Timeout: ${LOGIN_TIMEOUT_MS / 1000} seconds\n`);
 
-      await page.waitForURL(/\/admin/, { timeout: LOGIN_TIMEOUT_MS });
+      await page.waitForURL(/\/admin/, { timeout: LOGIN_TIMEOUT_MS, waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(3000);
       console.log('  Login successful!');
     }
