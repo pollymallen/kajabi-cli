@@ -92,13 +92,15 @@ export async function refreshSession(sessionPath = SESSION_PATH) {
       console.log('  Please log in with email, password, and 2FA in the browser.');
       console.log(`  Timeout: ${LOGIN_TIMEOUT_MS / 1000} seconds\n`);
 
-      try {
-        await page.waitForURL(/\/admin/, { timeout: LOGIN_TIMEOUT_MS, waitUntil: 'commit' });
-      } catch (err) {
-        // Intermediate redirects in the Auth0 → Cloudflare → Kajabi chain can
-        // return HTTP error codes that Playwright surfaces as ERR_HTTP_RESPONSE_CODE_FAILURE.
-        // If we actually landed on an admin page, ignore the error and continue.
-        if (!page.url().includes('/admin')) throw err;
+      // Poll page.url() instead of waitForURL — the Auth0 → Cloudflare → Kajabi
+      // redirect chain can return HTTP error codes that cause waitForURL to throw
+      // before the final URL is reached.
+      const deadline = Date.now() + LOGIN_TIMEOUT_MS;
+      while (!page.url().includes('/admin')) {
+        if (Date.now() >= deadline) {
+          throw new Error('Login timeout — did not reach Kajabi admin within 5 minutes');
+        }
+        await page.waitForTimeout(1000);
       }
       await page.waitForTimeout(3000);
       console.log('  Login successful!');
