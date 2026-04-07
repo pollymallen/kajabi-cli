@@ -20,8 +20,10 @@ Everything is read-only by default. The only things that can create or change co
 
 ### For Claude Code users
 
-```bash
-claude plugin install kajabi
+In Claude Code, run:
+
+```
+/plugin marketplace add pollymallen/kajabi-cli
 ```
 
 That's it for the install. Then run setup once:
@@ -76,7 +78,7 @@ Claude will use the plugin to pull the relevant data, then answer or format it h
 
 ## Using with Claude Desktop (Cowork)
 
-The plugin works in the Cowork tab in Claude Desktop, but it needs to be installed separately there using the same `claude plugin install kajabi` command.
+The plugin works in the Cowork tab in Claude Desktop, but it needs to be installed separately there using the same `/plugin marketplace add pollymallen/kajabi-cli` command.
 
 One thing to know about the browser login: the Kajabi auth flow (the browser window that opens during setup) needs a display to work — it can't run in the background. Run `kajabi setup` from Claude Code CLI or the Claude Desktop app first. Once you've authenticated, the session token is cached on your machine for about 24 hours, and any Cowork session running locally will use that cached token without needing the browser again.
 
