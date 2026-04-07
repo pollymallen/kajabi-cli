@@ -1,0 +1,13 @@
+{
+  "name": "kajabi",
+  "version": "0.1.0",
+  "description": "Ask Claude questions about your Kajabi business — revenue, transactions, contacts, email stats, and content drafting.",
+  "author": {
+    "name": "Polly Allen",
+    "url": "https://github.com/pollymallen"
+  },
+  "repository": "https://github.com/pollymallen/kajabi-cli",
+  "homepage": "https://github.com/pollymallen/kajabi-cli#readme",
+  "license": "MIT",
+  "keywords": ["kajabi", "revenue", "ecommerce", "email", "business"]
+}

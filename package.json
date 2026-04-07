@@ -4,7 +4,7 @@
   "description": "Unofficial Kajabi CLI — reverse-engineered internal API client",
   "type": "module",
   "bin": {
-    "kajabi": "./bin/kajabi.js"
+    "kajabi": "./bin/kajabi"
   },
   "scripts": {
     "intercept": "node scripts/api-interceptor.js",

@@ -1,167 +1,187 @@
-# kajabi-cli
+# kajabi
 
-Unofficial CLI for Kajabi. Reverse-engineered from Kajabi's internal admin API — not affiliated with Kajabi.
+Ask Claude questions about your Kajabi business and get real answers — revenue, transactions, refunds, contacts, email stats, and more.
 
-## Why this exists
+> **Unofficial plugin. Not affiliated with or endorsed by Kajabi.**
 
-Kajabi launched an [official public API](https://developers.kajabi.com/) in 2024/2025, but it's limited in scope (contacts, products, webhooks) and gated behind a paid add-on. It doesn't cover the data most operators actually need day-to-day: per-transaction revenue detail, MRR trends, opt-in analytics, email campaign history, or programmatic content drafting.
+---
 
-This CLI accesses Kajabi's internal admin API — the same endpoints the web dashboard uses — to fill that gap. It replaces slow, brittle browser automation with direct API calls.
+## What this does
 
-**What the official API covers:** contacts, products, members, webhooks
-**What this CLI covers:** transactions, revenue, MRR, refunds, offers, contacts, segments, email campaigns, opt-ins, page views, email broadcast drafting, blog post management
+Kajabi's built-in reporting is fine for quick glances, but it's slow to navigate and hard to slice. This plugin connects Claude to your Kajabi account so you can ask plain-English questions — "What was our MRR last quarter?" or "Export all refunds from this year" — and get answers without clicking through dashboards.
 
-## Requirements
+It covers the data Kajabi's official API doesn't: per-transaction detail, MRR trends, refund history, opt-in analytics, email campaign performance, and content drafting. Once you're set up, most queries run in seconds.
 
-- Node.js 18+
-- Chromium (for session refresh): `npx playwright install chromium`
+Everything is read-only by default. The only things that can create or change content in Kajabi are the draft commands, and those only create drafts — nothing gets published automatically.
+
+---
 
 ## Install
+
+### For Claude Code users
+
+```bash
+claude plugin install kajabi
+```
+
+That's it for the install. Then run setup once:
+
+```bash
+kajabi setup
+```
+
+### First-time setup
+
+Setup takes about 60 seconds and walks you through two things:
+
+**1. Your Kajabi site ID**
+
+This is the number in the URL when you're logged into your Kajabi dashboard. Look at the address bar — you'll see something like `app.kajabi.com/admin/sites/123456789`. The number at the end is your site ID.
+
+**2. Logging into Kajabi**
+
+After you enter your site ID, a browser window will open and take you to the Kajabi login page. This is expected and safe. Kajabi uses security measures that require a real browser to log in — the plugin can't bypass that, so it uses your actual browser session instead.
+
+Log in the same way you normally would: email, password, and 2FA if you have it enabled. Once you're logged in, the browser will close and you're done. From that point on, most commands run without opening a browser for about 24 hours. When the session expires, the browser will open briefly to refresh it.
+
+---
+
+## Privacy & safety
+
+- Your Kajabi password is never stored anywhere. The plugin doesn't see it — you type it directly into the browser window that Kajabi controls.
+- The only files saved to your computer are a session token (the same kind your browser holds when you're logged into Kajabi) and your site ID. These live in `~/.kajabi-cli/` on your machine.
+- The plugin only ever contacts Kajabi's own servers (`app.kajabi.com`). Nothing goes to Anthropic, nothing goes to the plugin author, no usage data is collected.
+- Full source code is open and readable: https://github.com/pollymallen/kajabi-cli
+
+---
+
+## What you can ask Claude
+
+Once the plugin is installed and you're authenticated, just ask Claude naturally:
+
+- "How much revenue did we make this month?"
+- "What's our current MRR?"
+- "Show me all refunds from this year"
+- "Export all transactions from Q1 as a CSV"
+- "What offers have brought in the most revenue?"
+- "How many new contacts did we get last month?"
+- "What's our opt-in rate been over the past 90 days?"
+- "Show me email campaigns from the last 6 months"
+- "Draft an email broadcast with the subject 'New program announcement'"
+- "Create a blog post draft titled 'How to future-proof your career'"
+
+Claude will use the plugin to pull the relevant data, then answer or format it however you ask.
+
+---
+
+## Using with Claude Desktop (Cowork)
+
+The plugin works in the Cowork tab in Claude Desktop, but it needs to be installed separately there using the same `claude plugin install kajabi` command.
+
+One thing to know about the browser login: the Kajabi auth flow (the browser window that opens during setup) needs a display to work — it can't run in the background. Run `kajabi setup` from Claude Code CLI or the Claude Desktop app first. Once you've authenticated, the session token is cached on your machine for about 24 hours, and any Cowork session running locally will use that cached token without needing the browser again.
+
+---
+
+## Commands reference
+
+For times when you want to be specific about what you're asking for, here's the full set of available commands.
+
+### Revenue & Transactions
+
+| Command | What it does |
+|---------|--------------|
+| `kajabi stats` | Quick stats and lifetime revenue |
+| `kajabi transactions --page=1` | Per-purchase detail (paginated) |
+| `kajabi transactions --all --start=2026-01-01` | All transactions since a date |
+| `kajabi transactions --all --csv --output=txns.csv` | Export to CSV |
+| `kajabi payments-by-offer --start=2026-01-01` | Revenue broken down by offer |
+| `kajabi revenue --start=2026-01-01` | Revenue report |
+| `kajabi revenue --export` | Revenue export (triggers background job) |
+| `kajabi refunds --start=2026-01-01` | Refunds |
+| `kajabi mrr --start=2026-01-01` | MRR over time |
+
+### Marketing & Contacts
+
+| Command | What it does |
+|---------|--------------|
+| `kajabi offers` | All offers with revenue totals |
+| `kajabi contacts --all --csv --output=contacts.csv` | Full contact export |
+| `kajabi segments` | List segments |
+| `kajabi emails --status=sent` | Email campaigns |
+| `kajabi optins --start=2026-01-01` | Opt-in report |
+| `kajabi pageviews --start=2026-01-01` | Page views |
+| `kajabi offers-sold --start=2026-01-01` | Offers sold report |
+| `kajabi newsletter` | Newsletter config |
+
+### Content Drafting
+
+These commands create drafts only — nothing is sent or published automatically.
+
+| Command | What it does |
+|---------|--------------|
+| `kajabi email-draft --title="..." --subject="..." --body-file=body.html` | Create an email broadcast draft |
+| `kajabi blog-draft --title="..." --body-file=body.html --slug=my-post` | Create a blog post draft |
+| `kajabi blog-update --id=POST_ID --body-file=updated.html --publish` | Update and publish a blog post |
+| `kajabi blog-tags` | List available blog tags |
+
+### Config & Debug
+
+| Command | What it does |
+|---------|--------------|
+| `kajabi setup` | Run the setup wizard |
+| `kajabi config` | View current config |
+| `kajabi config --site-id=XXX --email=you@example.com` | Set config manually |
+| `kajabi token` | Print the current session token (for debugging) |
+| `kajabi site` | Site info |
+| `kajabi products` | List products |
+
+### Common Options
+
+| Flag | What it does |
+|------|--------------|
+| `--start=YYYY-MM-DD` | Start date for reports |
+| `--end=YYYY-MM-DD` | End date for reports |
+| `--all` | Fetch all pages (transactions, contacts, emails) |
+| `--csv` | Output as CSV |
+| `--output=FILE` | Write CSV to a file |
+| `--json` | Output as JSON (transactions) |
+| `--page=N` | Page number |
+
+---
+
+## Troubleshooting
+
+**"kajabi-cli is not configured yet"** — Run `kajabi setup`.
+
+**"No valid JWT token found"** — Run any command; a browser will open to refresh your login.
+
+**Browser opens but auth fails** — Run `node scripts/login-and-test.js` for diagnostics.
+
+**Browser doesn't open** — Run `npx playwright install chromium`.
+
+---
+
+## For developers (CLI usage)
+
+The underlying tool is also available as a standalone CLI. If you want to use it directly, outside of Claude:
 
 ```bash
 git clone https://github.com/pollymallen/kajabi-cli
 cd kajabi-cli
 npm install
 npx playwright install chromium
-npm link          # makes `kajabi` available globally
+npm link    # makes `kajabi` available as a global command
 ```
 
-## First-time setup
+Then run `kajabi setup` and you're good to go from any terminal.
 
-```bash
-kajabi setup
-```
+**Architecture notes:**
+- Node.js ESM, native `fetch`, no axios
+- Auth: JWT from `window.validationToken` + session cookies
+- Token cache: `~/.kajabi-cli/token-cache.json` (~24h TTL)
+- Playwright is used only for the session refresh (headed browser to bypass Cloudflare bot detection)
 
-This prompts for your site ID and email, then opens a browser to authenticate. Takes about 60 seconds. Re-run any time to update config or re-authenticate.
-
-**Finding your site ID:** Log into Kajabi and look at the URL — it's the number in `/admin/sites/XXXXXXX`.
-
-Or configure manually:
-
-```bash
-kajabi config --site-id=YOUR_SITE_ID --email=you@example.com
-```
-
-Or with environment variables (useful for scripts):
-
-```bash
-export KAJABI_SITE_ID=YOUR_SITE_ID
-export KAJABI_EMAIL=you@example.com
-```
-
-## Auth
-
-Kajabi uses Auth0 + Cloudflare bot detection, which requires a real browser for login. The CLI handles this automatically:
-
-1. First run opens a visible Chromium browser
-2. Log in with your Kajabi email, password, and 2FA
-3. The CLI captures the JWT token and caches it (~24h TTL)
-4. Subsequent calls use the cached token — no browser needed
-
-When the token expires, the browser opens again. Your credentials are never stored.
-
-## Commands
-
-### Revenue & Transactions
-
-```bash
-kajabi stats                                      # Quick stats + lifetime revenue
-kajabi transactions --page=1                      # Per-purchase detail (paginated)
-kajabi transactions --all --start=2026-01-01      # All transactions since date
-kajabi transactions --all --csv --output=txns.csv # Export to CSV
-kajabi payments-by-offer --start=2026-01-01       # Revenue by offer
-kajabi revenue --start=2026-01-01                 # Revenue report
-kajabi revenue --export                           # Revenue export (triggers background job)
-kajabi refunds --start=2026-01-01                 # Refunds
-kajabi mrr --start=2026-01-01                     # MRR over time
-```
-
-### Marketing & Contacts
-
-```bash
-kajabi offers                                     # All offers with revenue
-kajabi contacts --all --csv --output=contacts.csv # Full contact export
-kajabi segments                                   # List segments
-kajabi emails --status=sent                       # Email campaigns
-kajabi optins --start=2026-01-01                  # Opt-in report
-kajabi pageviews --start=2026-01-01               # Page views
-kajabi offers-sold --start=2026-01-01             # Offers sold report
-kajabi newsletter                                 # Newsletter config
-```
-
-### Content Drafting (draft-only — never sends or publishes automatically)
-
-```bash
-# Email broadcast
-kajabi email-draft \
-  --title="Internal title" \
-  --subject="Subject line" \
-  --body-file=body.html
-
-# Blog post
-kajabi blog-draft \
-  --title="Post Title" \
-  --body-file=body.html \
-  --slug=my-post \
-  --seo-title="SEO Title" \
-  --tags=tag1,tag2
-
-kajabi blog-update --id=POST_ID --body-file=updated.html --publish
-kajabi blog-tags
-```
-
-### Config & Debug
-
-```bash
-kajabi setup                                      # First-time setup wizard
-kajabi config                                     # View current config
-kajabi config --site-id=XXX --email=you@ex.com   # Set config
-kajabi token                                      # Print current JWT (debug)
-kajabi site                                       # Site info
-kajabi products                                   # List products
-```
-
-## Common Options
-
-| Flag | Description |
-|------|-------------|
-| `--start=YYYY-MM-DD` | Start date for reports |
-| `--end=YYYY-MM-DD` | End date for reports |
-| `--all` | Fetch all pages (transactions, contacts, emails) |
-| `--csv` | Output as CSV |
-| `--output=FILE` | Write CSV to file |
-| `--json` | Output as JSON (transactions) |
-| `--page=N` | Page number |
-
-## Architecture
-
-- **Node.js ESM** — native `fetch`, no axios
-- **Auth:** JWT from `window.validationToken` + session cookies
-- **Token cache:** `~/.kajabi-cli/token-cache.json` (~24h TTL)
-- **Session store:** `~/.kajabi-cli/session.json`
-- **Playwright:** used only for session refresh (headed browser to bypass Cloudflare bot detection)
-
-## Using with Claude Code / Cowork
-
-Most commands work anywhere Claude Code runs. The exception is the auth flow: `kajabi setup` and session refresh open a headed Chromium browser for login + 2FA, which requires a display.
-
-- **Claude Code CLI / Desktop app (local):** fully supported — the browser opens on your machine as normal
-- **Claude Desktop Cowork tab:** fully supported — Dispatch-spawned Code sessions run locally
-- **Remote or headless environments:** auth will fail (no display for the browser). Run `kajabi setup` locally first to cache the session, then use the cached token in remote environments
-
-Once authenticated, the token is cached for ~24 hours. Most commands don't need the browser at all during that window.
-
-## Troubleshooting
-
-**"kajabi-cli is not configured yet"** — run `kajabi setup`
-
-**"No valid JWT token found"** — run any command; a browser will open for login
-
-**Browser opens but auth fails** — run `node scripts/login-and-test.js` for diagnostics
-
-**"Cannot find module"** — run `npm install && npm link`
-
-**Browser doesn't open** — run `npx playwright install chromium`
+---
 
 ## Disclaimer
 
