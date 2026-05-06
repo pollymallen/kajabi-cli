@@ -22,6 +22,7 @@ import fs from 'fs';
 import path from 'path';
 import { getSiteId } from './config.js';
 import { USER_AGENT, KAJABI_CLI_DIR } from './constants.js';
+import { debug } from './debug.js';
 
 const SESSION_PATH = path.join(KAJABI_CLI_DIR, 'session.json');
 const TOKEN_CACHE_PATH = path.join(KAJABI_CLI_DIR, 'token-cache.json');
@@ -32,18 +33,30 @@ const LOGIN_TIMEOUT_MS = 300_000; // 5 min for manual login + 2FA
  * Check if the session cookies are fresh enough for API calls.
  */
 export function isSessionFresh(sessionPath = SESSION_PATH) {
-  if (!fs.existsSync(sessionPath)) return false;
+  if (!fs.existsSync(sessionPath)) {
+    debug('session', 'No session file found', sessionPath);
+    return false;
+  }
 
   const data = JSON.parse(fs.readFileSync(sessionPath, 'utf-8'));
   const cfCookie = data.cookies?.find(c => c.name === '__cf_bm' && c.domain?.includes('kajabi'));
   const sessionCookie = data.cookies?.find(c => c.name === '_kjb_session');
 
-  if (!cfCookie || !sessionCookie) return false;
+  if (!cfCookie || !sessionCookie) {
+    debug('session', 'Missing cookies', { hasCf: !!cfCookie, hasKjbSession: !!sessionCookie });
+    return false;
+  }
 
-  // __cf_bm must have at least 2 min remaining
   const cfExpires = cfCookie.expires * 1000;
-  if (cfExpires < Date.now() + 120_000) return false;
+  const remaining = cfExpires - Date.now();
+  debug('session', `__cf_bm expires in ${Math.round(remaining / 1000)}s`);
 
+  if (remaining < 120_000) {
+    debug('session', 'Cloudflare cookie expiring soon — session stale');
+    return false;
+  }
+
+  debug('session', 'Session is fresh');
   return true;
 }
 
@@ -72,26 +85,34 @@ export async function refreshSession(sessionPath = SESSION_PATH) {
     const context = await browser.newContext(contextOptions);
     const page = await context.newPage();
 
-    // Set up JWT interceptor before any navigation so we catch API calls
-    // that fire during the initial page load.
     let interceptedToken = null;
+    let interceptedRequestCount = 0;
     page.on('request', (req) => {
-      if (interceptedToken) return;
       const auth = req.headers()['authorization'];
+      if (auth) {
+        interceptedRequestCount++;
+        debug('session', `Request #${interceptedRequestCount} with auth header → ${req.url().slice(0, 80)}`);
+      }
+      if (interceptedToken) return;
       if (auth && auth.startsWith('eyJ')) {
         interceptedToken = auth;
+        debug('session', 'JWT intercepted from request header', `${auth.slice(0, 40)}...`);
       }
     });
 
-    // Navigate to the site dashboard
+    const targetUrl = `${KAJABI_BASE}/admin/sites/${getSiteId()}/dashboard`;
+    debug('session', 'Navigating to', targetUrl);
     console.log('  Refreshing Kajabi session...');
-    await page.goto(`${KAJABI_BASE}/admin/sites/${getSiteId()}/dashboard`, {
+    await page.goto(targetUrl, {
       waitUntil: 'domcontentloaded',
       timeout: 15000,
-    }).catch(() => {});
+    }).catch((err) => {
+      debug('session', 'Navigation error (may be OK — redirect expected)', err.message);
+    });
     await page.waitForTimeout(3000);
 
     let url = page.url();
+    debug('session', 'Landed on', url);
 
     if (url.includes('/admin/sites/')) {
       console.log('  Session refreshed (no login needed)');
@@ -122,35 +143,35 @@ export async function refreshSession(sessionPath = SESSION_PATH) {
       }).catch(() => {});
     }
 
-    // Capture fresh JWT — two methods:
-    // 1. Intercepted authorization header from SPA API calls (interceptor above)
-    // 2. window.validationToken (set by SPA JS after page load)
     console.log('  Capturing JWT...');
+    debug('session', 'Waiting 5s for SPA to bootstrap...');
     await page.waitForTimeout(5000);
 
-    // Check window.validationToken
     let token = await page.evaluate(() => window.validationToken).catch(() => null);
+    debug('session', 'window.validationToken', token ? `${String(token).slice(0, 40)}...` : '(not set)');
     if (token && !token.startsWith('eyJ')) token = null;
 
-    // Use whichever method captured a token
     token = token || interceptedToken;
+    debug('session', 'Token after first check', { fromWindow: !!token && token !== interceptedToken, fromInterceptor: !!interceptedToken });
 
     if (token) {
       console.log('  JWT captured');
     } else {
-      // Last resort: poll for up to 10 seconds
       console.log('  Waiting for SPA to initialize...');
       for (let i = 0; i < 10 && !token; i++) {
         await page.waitForTimeout(1000);
         token = await page.evaluate(() => window.validationToken).catch(() => null);
+        debug('session', `Poll ${i + 1}/10 — window.validationToken:`, token ? 'found' : 'not set');
         if (token && !token.startsWith('eyJ')) token = null;
         token = token || interceptedToken;
       }
 
       if (token) {
         console.log('  JWT captured');
+        debug('session', `Got token after ${10} polls`);
       } else {
         console.log('  Warning: Could not capture JWT. Run: node scripts/login-and-test.js');
+        debug('session', 'FAILED — no JWT from window or interceptor', { interceptedRequestCount });
       }
     }
 
@@ -158,20 +179,29 @@ export async function refreshSession(sessionPath = SESSION_PATH) {
     await context.storageState({ path: sessionPath });
     console.log('  Session saved');
 
-    // Cache the JWT if we got one
     if (token) {
       try {
         const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
+        const expiresAt = payload.exp * 1000;
+        debug('session', 'JWT payload', {
+          email: payload.email,
+          userId: payload.id,
+          expiresAt: new Date(expiresAt).toISOString(),
+          ttlHours: Math.round((expiresAt - Date.now()) / 3600000 * 10) / 10,
+        });
         fs.mkdirSync(path.dirname(TOKEN_CACHE_PATH), { recursive: true });
         fs.writeFileSync(TOKEN_CACHE_PATH, JSON.stringify({
           token,
-          expiresAt: payload.exp * 1000,
+          expiresAt,
           email: payload.email,
           userId: payload.id,
           cachedAt: new Date().toISOString(),
         }, null, 2));
         console.log('  JWT token cached');
-      } catch {}
+        debug('session', 'Token cached to', TOKEN_CACHE_PATH);
+      } catch (err) {
+        debug('session', 'Failed to cache token', err.message);
+      }
     }
 
     return true;

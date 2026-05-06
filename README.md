@@ -148,14 +148,30 @@ These commands create drafts only — nothing is sent or published automatically
 | `--output=FILE` | Write CSV to a file |
 | `--json` | Output as JSON (transactions) |
 | `--page=N` | Page number |
+| `-v, --verbose` | Show debug logs (auth, session, API calls) |
 
 ---
 
 ## Troubleshooting
 
+Add `--verbose` (or `-v`) to any command to see what's happening under the hood — session cookie status, JWT capture method, token expiry, API response times. You can also set `KAJABI_DEBUG=1` as an environment variable.
+
+```bash
+kajabi --verbose stats
+```
+
+The verbose output shows each step of the auth flow:
+
+- Whether your session cookies are fresh or expired
+- Where the JWT came from (intercepted from a request header vs. extracted from the page)
+- Token details (email, expiry, time remaining)
+- Every API call with status code and latency
+
 **"kajabi-cli is not configured yet"** — Run `kajabi setup`.
 
-**"No valid JWT token found"** — Run any command; a browser will open to refresh your login.
+**"No valid JWT token found"** — Your session expired. Run any command and a browser will open to refresh your login.
+
+**JWT not captured (you see `FAILED — no JWT from window or interceptor` in verbose output)** — The browser opened and you logged in, but the CLI couldn't grab the token. Try running `kajabi setup` again. If it keeps failing, send the `--verbose` output.
 
 **Browser opens but auth fails** — Run `node scripts/login-and-test.js` for diagnostics.
 

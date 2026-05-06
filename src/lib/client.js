@@ -7,6 +7,7 @@
 
 import { getSiteId } from './config.js';
 import { USER_AGENT } from './constants.js';
+import { debug } from './debug.js';
 
 const BASE_URL = 'https://app.kajabi.com';
 
@@ -47,14 +48,18 @@ export class KajabiClient {
       }
     }
 
+    debug('api', `${method} ${url.pathname}${url.search}`);
+    const start = Date.now();
     const res = await fetch(url.toString(), {
       method,
       headers: reqHeaders,
       body: body ? JSON.stringify(body) : undefined,
     });
+    debug('api', `${res.status} in ${Date.now() - start}ms`);
 
     if (!res.ok) {
       const text = await res.text().catch(() => '');
+      debug('api', 'Error response body', text.slice(0, 300));
       throw new Error(`Kajabi API ${method} ${path}: ${res.status} ${res.statusText}\n${text.slice(0, 500)}`);
     }
 

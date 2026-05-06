@@ -27,6 +27,7 @@ import { getToken, loadSession, buildCookieHeader } from '../src/lib/auth.js';
 import { KajabiClient } from '../src/lib/client.js';
 import { refreshSession, isSessionFresh } from '../src/lib/session.js';
 import { showConfig, saveConfig, getConfig } from '../src/lib/config.js';
+import { enableDebug } from '../src/lib/debug.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../package.json');
@@ -39,8 +40,9 @@ const SHORT_FLAGS = {
   '-p': 'page',
   '-h': 'help',
   '-V': 'version',
+  '-v': 'verbose',
 };
-const SHORT_FLAGS_BOOLEAN = new Set(['-h', '-V']);
+const SHORT_FLAGS_BOOLEAN = new Set(['-h', '-V', '-v']);
 
 function parseArgs() {
   const args = { _: [] };
@@ -551,17 +553,26 @@ const COMMANDS = {
 
     // Show current config so re-running setup is non-destructive
     const current = getConfig();
+    const hasValidSiteId = current.siteId && /^\d+$/.test(current.siteId);
 
-    const siteIdPrompt = current.siteId
+    const siteIdPrompt = hasValidSiteId
       ? `Site ID [${current.siteId}]: `
       : 'Site ID (find it in your Kajabi URL — app.kajabi.com/admin/sites/XXXXXXX): ';
-    const siteIdInput = (await ask(siteIdPrompt)).trim();
-    const siteId = siteIdInput || current.siteId;
 
-    if (!siteId) {
-      console.error('\nSite ID is required. Find it in your Kajabi admin URL.');
-      rl.close();
-      process.exit(1);
+    let siteId;
+    while (true) {
+      const siteIdInput = (await ask(siteIdPrompt)).trim();
+      siteId = siteIdInput || (hasValidSiteId ? current.siteId : null);
+
+      if (!siteId) {
+        console.error('  Site ID is required. Find it in your Kajabi admin URL.');
+        continue;
+      }
+      if (!/^\d+$/.test(siteId)) {
+        console.error(`  "${siteId}" doesn't look like a site ID. It should be a number (e.g. 2147605180).`);
+        continue;
+      }
+      break;
     }
 
     const emailPrompt = current.email
@@ -622,6 +633,8 @@ async function main() {
   const args = parseArgs();
   const command = args._[0];
 
+  if (args.verbose) enableDebug();
+
   if (args.version) {
     console.log(`kajabi-cli v${version}`);
     return;
@@ -674,6 +687,7 @@ Options:
   -p, --page=N             Page number
       --csv                Output as CSV instead of JSON
       --all                Fetch all pages (transactions, contacts, emails)
+  -v, --verbose            Show debug logs (auth, session, API calls)
   -h, --help               Show this help
   -V, --version            Show version`);
     return;

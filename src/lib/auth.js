@@ -15,6 +15,7 @@ import fs from 'fs';
 import path from 'path';
 import { getSiteId } from './config.js';
 import { USER_AGENT, KAJABI_CLI_DIR } from './constants.js';
+import { debug } from './debug.js';
 
 const DEFAULT_SESSION_PATH = path.join(KAJABI_CLI_DIR, 'session.json');
 const TOKEN_CACHE_PATH = path.join(KAJABI_CLI_DIR, 'token-cache.json');
@@ -208,6 +209,7 @@ function saveTokenCache(token) {
  * Validate a token against the live API. Returns true if it works.
  */
 export async function validateToken(token, cookieHeader) {
+  debug('auth', 'Validating token against live API...');
   try {
     const res = await fetch(
       `https://app.kajabi.com/api/dashboard/lifetime_net_revenue?site_id=${getSiteId()}`,
@@ -220,8 +222,10 @@ export async function validateToken(token, cookieHeader) {
         },
       }
     );
+    debug('auth', `Validation response: ${res.status}`);
     return res.status === 200;
-  } catch {
+  } catch (err) {
+    debug('auth', 'Validation failed', err.message);
     return false;
   }
 }
@@ -233,10 +237,20 @@ export async function validateToken(token, cookieHeader) {
  * server-invalidated even if their JWT exp timestamp hasn't passed.
  */
 export async function getToken(sessionPath) {
-  // Check token cache (populated by session refresh)
   const cached = loadTokenCache();
   if (cached?.token && cached?.expiresAt > Date.now()) {
+    const ttl = Math.round((cached.expiresAt - Date.now()) / 60000);
+    debug('auth', `Cached token valid — ${ttl} min remaining (email: ${cached.email})`);
     return cached.token;
+  }
+
+  if (cached) {
+    debug('auth', 'Cached token expired', {
+      expiresAt: new Date(cached.expiresAt).toISOString(),
+      agoMin: Math.round((Date.now() - cached.expiresAt) / 60000),
+    });
+  } else {
+    debug('auth', 'No token cache file found');
   }
 
   throw new Error(
