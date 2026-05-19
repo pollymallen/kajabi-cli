@@ -11,6 +11,7 @@
  *   kajabi contacts [--page=N]
  *   kajabi segments
  *   kajabi emails [--page=N] [--status=scheduled|sent|draft]
+ *   kajabi email-report [--id=CAMPAIGN_ID] [--status=sent]
  *   kajabi newsletter
  *   kajabi refunds [--start=YYYY-MM-DD] [--end=YYYY-MM-DD]
  *   kajabi optins [--start=YYYY-MM-DD] [--end=YYYY-MM-DD]
@@ -219,6 +220,73 @@ const COMMANDS = {
         await outputCsv(header, rows, args);
       } else {
         print(data);
+      }
+    }
+  },
+
+  async 'email-report'(client, args) {
+    // Fetch campaigns (optionally filtered)
+    const allEmails = [];
+    let page = 1;
+    let totalPages = 1;
+    const status = args.status || 'sent';
+    while (page <= totalPages) {
+      const data = await client.getEmailCampaigns({ page, status, search: args.search || '' });
+      totalPages = data.total_pages || 1;
+      allEmails.push(...(data.email_campaigns || []));
+      page++;
+    }
+
+    // Filter to specific ID if requested
+    let campaigns = allEmails;
+    if (args.id) {
+      const targetId = parseInt(args.id);
+      campaigns = campaigns.filter(e => e.id === targetId || e.emailable_id === targetId);
+    }
+
+    if (campaigns.length === 0) {
+      console.log('No email campaigns found.');
+      return;
+    }
+
+    // Fetch stats for all campaigns in one batch
+    const campaignIds = campaigns.map(e => e.id);
+    const statsData = await client.getEmailCampaignStats(campaignIds);
+    const statsMap = Object.fromEntries(statsData.map(s => [s.email_campaign_id, s.stats]));
+
+    if (args.csv) {
+      const header = 'id,title,status,sent,opened,open_rate,clicked,click_rate,unsubscribed';
+      const rows = campaigns.map(e => {
+        const s = statsMap[e.id] || {};
+        const sent = s.send_count || 0;
+        const opened = s.opened_count || 0;
+        const clicked = s.clicked_count || 0;
+        const unsub = s.unsubscribed_count || 0;
+        const openRate = sent > 0 ? (opened / sent * 100).toFixed(1) : '0.0';
+        const clickRate = opened > 0 ? (clicked / opened * 100).toFixed(1) : '0.0';
+        return [e.id, csvEscape(e.title), e.status, sent, opened, openRate, clicked, clickRate, unsub].join(',');
+      });
+      await outputCsv(header, rows, args);
+    } else if (args.json) {
+      const result = campaigns.map(e => {
+        const s = statsMap[e.id] || {};
+        return { ...e, stats: s };
+      });
+      print(result);
+    } else {
+      for (const e of campaigns) {
+        const s = statsMap[e.id] || {};
+        const sent = s.send_count || 0;
+        const opened = s.opened_count || 0;
+        const clicked = s.clicked_count || 0;
+        const unsub = s.unsubscribed_count || 0;
+        const openRate = sent > 0 ? (opened / sent * 100).toFixed(1) : '0.0';
+        const clickRate = opened > 0 ? (clicked / opened * 100).toFixed(1) : '0.0';
+
+        console.log(`  ${e.title}`);
+        console.log(`    ${e.description || ''}`);
+        console.log(`    Sent: ${sent.toLocaleString()}  |  Opened: ${opened.toLocaleString()} (${openRate}%)  |  Clicked: ${clicked.toLocaleString()} (${clickRate}% of opens)  |  Unsubs: ${unsub}`);
+        console.log();
       }
     }
   },
@@ -667,6 +735,7 @@ Commands:
   contacts         Contact list (--page=N, --all, --csv, --output=)
   segments         List all segments
   emails           Email campaigns (--page=N, --all, --csv, --status=, --search=)
+  email-report     Email stats: opens, clicks, unsubs (--id=, --status=, --csv, --json)
   blog-draft       Create blog post draft + open in browser
                    (--title= --body-file= --slug= --seo-title= --seo-desc= --tags=)
   blog-update      Update an existing blog post
