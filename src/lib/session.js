@@ -27,7 +27,10 @@ import { debug } from './debug.js';
 const SESSION_PATH = path.join(KAJABI_CLI_DIR, 'session.json');
 const TOKEN_CACHE_PATH = path.join(KAJABI_CLI_DIR, 'token-cache.json');
 const KAJABI_BASE = 'https://app.kajabi.com';
-const LOGIN_TIMEOUT_MS = 300_000; // 5 min for manual login + 2FA
+// 5 min for manual login + 2FA. Override with KAJABI_LOGIN_TIMEOUT_MS for
+// unattended callers (e.g. a scheduled refresh) that should fail fast when
+// a human really is needed instead of hanging for the full window.
+const LOGIN_TIMEOUT_MS = Number(process.env.KAJABI_LOGIN_TIMEOUT_MS) || 300_000;
 
 /**
  * Check if the session cookies are fresh enough for API calls.
@@ -102,7 +105,7 @@ export async function refreshSession(sessionPath = SESSION_PATH) {
 
     const targetUrl = `${KAJABI_BASE}/admin/sites/${getSiteId()}/dashboard`;
     debug('session', 'Navigating to', targetUrl);
-    console.log('  Refreshing Kajabi session...');
+    console.error('  Refreshing Kajabi session...');
     await page.goto(targetUrl, {
       waitUntil: 'domcontentloaded',
       timeout: 15000,
@@ -115,26 +118,28 @@ export async function refreshSession(sessionPath = SESSION_PATH) {
     debug('session', 'Landed on', url);
 
     if (url.includes('/admin/sites/')) {
-      console.log('  Session refreshed (no login needed)');
+      console.error('  Session refreshed (no login needed)');
     }
 
     // If we're on the login page (or anywhere else), wait for user to log in
     if (!url.includes('/admin/sites/')) {
-      console.log('\n  --- SESSION EXPIRED — LOGIN REQUIRED ---');
-      console.log('  Please log in with email, password, and 2FA in the browser.');
-      console.log(`  Timeout: ${LOGIN_TIMEOUT_MS / 1000} seconds\n`);
+      console.error('\n  --- SESSION EXPIRED — LOGIN REQUIRED ---');
+      console.error('  Please log in with email, password, and 2FA in the browser.');
+      console.error(`  Timeout: ${LOGIN_TIMEOUT_MS / 1000} seconds\n`);
 
       // Poll page.url() — waitForURL throws on intermediate HTTP errors in the
       // Auth0 → Cloudflare → Kajabi redirect chain.
       const deadline = Date.now() + LOGIN_TIMEOUT_MS;
       while (!page.url().includes('/admin')) {
         if (Date.now() >= deadline) {
-          throw new Error('Login timeout — did not reach Kajabi admin within 5 minutes');
+          throw new Error(`LOGIN_REQUIRED: did not reach Kajabi admin within `
+                          + `${Math.round(LOGIN_TIMEOUT_MS / 1000)}s — a real `
+                          + `password + 2FA login is needed`);
         }
         await page.waitForTimeout(1000);
       }
       await page.waitForTimeout(2000);
-      console.log('  Login successful!');
+      console.error('  Login successful!');
 
       // Navigate to a content page to trigger SPA API calls for JWT capture
       await page.goto(`${KAJABI_BASE}/admin/sites/${getSiteId()}/email_campaigns`, {
@@ -143,7 +148,7 @@ export async function refreshSession(sessionPath = SESSION_PATH) {
       }).catch(() => {});
     }
 
-    console.log('  Capturing JWT...');
+    console.error('  Capturing JWT...');
     debug('session', 'Waiting 5s for SPA to bootstrap...');
     await page.waitForTimeout(5000);
 
@@ -155,9 +160,9 @@ export async function refreshSession(sessionPath = SESSION_PATH) {
     debug('session', 'Token after first check', { fromWindow: !!token && token !== interceptedToken, fromInterceptor: !!interceptedToken });
 
     if (token) {
-      console.log('  JWT captured');
+      console.error('  JWT captured');
     } else {
-      console.log('  Waiting for SPA to initialize...');
+      console.error('  Waiting for SPA to initialize...');
       for (let i = 0; i < 10 && !token; i++) {
         await page.waitForTimeout(1000);
         token = await page.evaluate(() => window.validationToken).catch(() => null);
@@ -167,17 +172,17 @@ export async function refreshSession(sessionPath = SESSION_PATH) {
       }
 
       if (token) {
-        console.log('  JWT captured');
+        console.error('  JWT captured');
         debug('session', `Got token after ${10} polls`);
       } else {
-        console.log('  Warning: Could not capture JWT. Run: node scripts/login-and-test.js');
+        console.error('  Warning: Could not capture JWT. Run: node scripts/login-and-test.js');
         debug('session', 'FAILED — no JWT from window or interceptor', { interceptedRequestCount });
       }
     }
 
     // Save refreshed session
     await context.storageState({ path: sessionPath });
-    console.log('  Session saved');
+    console.error('  Session saved');
 
     if (token) {
       try {
@@ -197,7 +202,7 @@ export async function refreshSession(sessionPath = SESSION_PATH) {
           userId: payload.id,
           cachedAt: new Date().toISOString(),
         }, null, 2));
-        console.log('  JWT token cached');
+        console.error('  JWT token cached');
         debug('session', 'Token cached to', TOKEN_CACHE_PATH);
       } catch (err) {
         debug('session', 'Failed to cache token', err.message);

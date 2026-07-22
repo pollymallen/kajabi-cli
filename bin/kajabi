@@ -19,6 +19,8 @@
  *   kajabi mrr [--start=YYYY-MM-DD] [--end=YYYY-MM-DD]
  *   kajabi site
  *   kajabi token     (print current JWT for debugging)
+ *   kajabi refresh   (unattended-safe session refresh; prints REFRESHED /
+ *                     LOGIN_REQUIRED / ERROR — see KAJABI_LOGIN_TIMEOUT_MS)
  */
 
 import readline from 'readline';
@@ -545,6 +547,28 @@ const COMMANDS = {
     } catch {}
   },
 
+  // Unattended-safe: refreshes the JWT/session/Cloudflare layers whenever
+  // possible without a human (works as long as Auth0's ~6-day remembered-
+  // device cookie is still valid). Set KAJABI_LOGIN_TIMEOUT_MS to a short
+  // value (e.g. 15000) so a scheduled caller fails fast instead of hanging
+  // for the default 5-minute interactive window when a real login really
+  // is needed. Prints exactly one of: REFRESHED / LOGIN_REQUIRED / ERROR.
+  async refresh() {
+    try {
+      await refreshSession();
+      console.log('REFRESHED');
+    } catch (err) {
+      if (String(err.message).startsWith('LOGIN_REQUIRED')) {
+        console.log('LOGIN_REQUIRED');
+        console.error(err.message);
+        process.exit(2);
+      }
+      console.log('ERROR');
+      console.error(err.message);
+      process.exit(1);
+    }
+  },
+
   async setup() {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const ask = (q) => new Promise(resolve => rl.question(q, resolve));
@@ -711,6 +735,10 @@ Options:
   }
   if (command === 'config') {
     await handler(null, args);
+    return;
+  }
+  if (command === 'refresh') {
+    await handler();
     return;
   }
 
