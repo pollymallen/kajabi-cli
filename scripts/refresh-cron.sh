@@ -1,8 +1,11 @@
 #!/bin/zsh
 # Unattended session keep-alive, run on a schedule (launchd). Refreshes the
 # JWT/session/Cloudflare cookies without any human whenever possible — only
-# escalates to Slack when the Auth0 remembered-device cookie (~6 day TTL)
-# has actually expired and a real password + 2FA login is due.
+# escalates to Slack when a real password + 2FA login is due: either the
+# Auth0 remembered-device cookie (~6 day TTL) has expired (LOGIN_REQUIRED),
+# or the refresh reported success but a real API call still failed
+# (VALIDATION_FAILED — seen live 2026-07-23, `kajabi refresh` now checks
+# for this itself instead of trusting the browser flow's own say-so).
 #
 # Slack transport is borrowed from metrics-engine (core.escalate.escalate),
 # same pattern loop-ops/heartbeat_alert.py uses — kajabi-cli holds no Slack
@@ -39,6 +42,11 @@ if result == 'LOGIN_REQUIRED':
     escalate(key, 'open',
         ':rotating_light: *Kajabi session:* the ~6-day remembered-device cookie '
         'expired — a real password + 2FA login is due.\n'
+        '> what to do: *run \`kajabi stats\` in a terminal on this Mac to re-login (~60s)*')
+elif result == 'VALIDATION_FAILED':
+    escalate(key, 'open',
+        ':rotating_light: *Kajabi session:* auto-refresh reported success but a real '
+        'API call still failed (stale/invalid session) — a real password + 2FA login is due.\n'
         '> what to do: *run \`kajabi stats\` in a terminal on this Mac to re-login (~60s)*')
 elif result == 'REFRESHED' and current_state(key) == 'open':
     escalate(key, 'recovered',

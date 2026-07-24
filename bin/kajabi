@@ -25,7 +25,7 @@
 
 import readline from 'readline';
 import { createRequire } from 'module';
-import { getToken, loadSession, buildCookieHeader } from '../src/lib/auth.js';
+import { getToken, loadSession, buildCookieHeader, validateToken } from '../src/lib/auth.js';
 import { KajabiClient } from '../src/lib/client.js';
 import { refreshSession, isSessionFresh } from '../src/lib/session.js';
 import { showConfig, saveConfig, getConfig } from '../src/lib/config.js';
@@ -556,6 +556,24 @@ const COMMANDS = {
   async refresh() {
     try {
       await refreshSession();
+
+      // refreshSession() reports success whenever the browser flow completes
+      // (Auth0 recognized the device, no login screen shown) — but that flow
+      // can complete while the resulting JWT/cookies still fail real API
+      // calls (seen live 2026-07-23: "REFRESHED" followed immediately by a
+      // 401 "User doesn't match"). Don't trust the browser flow's own
+      // say-so — make one real authenticated request before declaring victory.
+      const token = await getToken();
+      const session = loadSession();
+      const cookieHeader = buildCookieHeader(session.cookies);
+      const ok = await validateToken(token, cookieHeader);
+      if (!ok) {
+        console.log('VALIDATION_FAILED');
+        console.error('refreshSession() reported success but the resulting '
+                      + 'session fails a real API call — treating as if a '
+                      + 'login is needed.');
+        process.exit(2);
+      }
       console.log('REFRESHED');
     } catch (err) {
       if (String(err.message).startsWith('LOGIN_REQUIRED')) {
