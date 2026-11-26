@@ -492,4 +492,71 @@ export class KajabiClient {
   async getNewsletter() {
     return this.request('/api/admin/newsletter');
   }
+
+  // ─── Landing Pages ───
+
+  async getLandingPages({ page = 1 } = {}) {
+    const res = await fetch(`${BASE_URL}/admin/sites/${this.siteId}/landing_pages?page=${page}`, {
+      headers: {
+        ...this.baseHeaders,
+        'accept': 'text/html',
+      },
+    });
+    const html = await res.text();
+    return this._parseLandingPages(html);
+  }
+
+  async getAllLandingPages() {
+    const firstResult = await this.getLandingPages({ page: 1 });
+    const allPages = [...firstResult.pages];
+    for (let p = 2; p <= firstResult.totalPages; p++) {
+      const result = await this.getLandingPages({ page: p });
+      allPages.push(...result.pages);
+    }
+    return allPages;
+  }
+
+  _parseLandingPages(html) {
+    const deletePattern = /href="\/admin\/landing_pages\/(\d+)"\s+data-method="delete"\s+data-confirm-modal="Are you sure you want to delete this ([^?]+)\?/g;
+    const deletes = [];
+    let match;
+    while ((match = deletePattern.exec(html)) !== null) {
+      deletes.push({ id: match[1], title: match[2].trim(), pos: match.index });
+    }
+
+    const pages = deletes.map((d, i) => {
+      const blockStart = i > 0 ? deletes[i - 1].pos + 1 : 0;
+      const block = html.slice(blockStart, d.pos);
+      const slugMatches = block.match(/aicareerboost\.com\/([^?\s"&]+)\?preview_token/g);
+      let slug = '';
+      if (slugMatches) {
+        const last = slugMatches[slugMatches.length - 1];
+        slug = last.match(/aicareerboost\.com\/([^?\s"&]+)/)[1];
+      }
+      return { id: d.id, slug, title: d.title };
+    });
+
+    const paginationMatch = html.match(/landing_pages\?page=(\d+)/g) || [];
+    const pageNums = paginationMatch.map(p => parseInt(p.match(/(\d+)/)[1]));
+    const totalPages = pageNums.length > 0 ? Math.max(...pageNums) : 1;
+
+    return { pages, totalPages };
+  }
+
+  async deleteLandingPage(pageId) {
+    const csrfToken = await this._getCsrfTokenFrom(`/admin/sites/${this.siteId}/landing_pages`);
+    const res = await fetch(`${BASE_URL}/admin/landing_pages/${pageId}`, {
+      method: 'DELETE',
+      headers: {
+        ...this.baseHeaders,
+        'accept': 'text/html',
+        'x-csrf-token': csrfToken,
+      },
+      redirect: 'manual',
+    });
+    if (res.status !== 302 && res.status !== 200 && res.status !== 204) {
+      throw new Error(`Failed to delete page ${pageId}: ${res.status}`);
+    }
+    return true;
+  }
 }

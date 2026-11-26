@@ -18,6 +18,7 @@
  *   kajabi offers-sold [--start=YYYY-MM-DD] [--end=YYYY-MM-DD]
  *   kajabi mrr [--start=YYYY-MM-DD] [--end=YYYY-MM-DD]
  *   kajabi site
+ *   kajabi event-emails --event=<ID> [--json] [--out=DIR]
  *   kajabi token     (print current JWT for debugging)
  *   kajabi refresh   (unattended-safe session refresh; prints REFRESHED /
  *                     LOGIN_REQUIRED / ERROR — see KAJABI_LOGIN_TIMEOUT_MS)
@@ -104,6 +105,123 @@ async function outputCsv(header, rows, args) {
 }
 
 const COMMANDS = {
+
+  /**
+   * event-emails — read the reminder emails attached to a Kajabi EVENT.
+   *
+   * These live as `event_action` records and are NOT reachable through the
+   * Kajabi MCP (no automations surface) nor through any public API. The only
+   * route is the admin HTML, via the CLI's own authenticated session.
+   *
+   *   kajabi event-emails --event=2148810628
+   *   kajabi event-emails --event=2148810628 --json
+   *   kajabi event-emails --event=2148810628 --out=./reminders
+   */
+  async 'event-emails'(client, args) {
+    const eventId = args.event || args.id;
+    if (!eventId) {
+      console.error('Usage: kajabi event-emails --event=<EVENT_ID> [--json] [--out=DIR]');
+      process.exit(1);
+    }
+
+    const session = loadSession();
+    const headers = {
+      authorization: await getToken(),
+      accept: 'text/html',
+      cookie: buildCookieHeader(session.cookies),
+      'user-agent': 'Mozilla/5.0',
+    };
+    const get = async (url) => {
+      const r = await fetch(url, { headers });
+      if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
+      return r.text();
+    };
+
+    const unescape = (t) => t
+      .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ');
+
+    // An <input> may render value= BEFORE or AFTER name= — match both orders.
+    const inputValue = (html, name) => {
+      const esc = name.replace(/[[\]]/g, '\\$&');
+      const after = new RegExp(`name="${esc}"[^>]*?value="([^"]*)"`);
+      const before = new RegExp(`value="([^"]*)"[^>]*?name="${esc}"`);
+      const m = html.match(after) || html.match(before);
+      return m ? unescape(m[1]) : '';
+    };
+    const textareaValue = (html, name) => {
+      const esc = name.replace(/[[\]]/g, '\\$&');
+      const m = html.match(new RegExp(`<textarea[^>]*name="${esc}"[^>]*>([\\s\\S]*?)</textarea>`));
+      return m ? unescape(m[1]) : '';
+    };
+    const selectedValue = (html, name) => {
+      const esc = name.replace(/[[\]]/g, '\\$&');
+      const blk = html.match(new RegExp(`<select[^>]*name="${esc}"[\\s\\S]*?</select>`));
+      if (!blk) return inputValue(html, name);
+      const m = blk[0].match(/<option[^>]*selected[^>]*value="([^"]*)"/)
+             || blk[0].match(/<option[^>]*value="([^"]*)"[^>]*selected/);
+      return m ? unescape(m[1]) : '';
+    };
+
+    // 1. discover the event_action ids from the event's edit page
+    const eventHtml = await get(`https://app.kajabi.com/admin/events/${eventId}/edit`);
+    const ids = [...new Set([...eventHtml.matchAll(/event_actions\/(\d+)/g)].map(m => m[1]))];
+    if (!ids.length) {
+      console.error(`No event_actions found on event ${eventId}.`);
+      process.exit(1);
+    }
+
+    // 2. read each one
+    const out = [];
+    for (const id of ids) {
+      const html = await get(`https://app.kajabi.com/admin/event_actions/${id}/edit`);
+      const bodyHtml = textareaValue(html, 'event_action[action_attributes][body]');
+      out.push({
+        id,
+        subject: inputValue(html, 'event_action[action_attributes][subject]'),
+        orientation: selectedValue(html, 'event_action[time_orientation]'),
+        interval: selectedValue(html, 'event_action[time_interval]'),
+        unit: selectedValue(html, 'event_action[time_unit]'),
+        bodyHtml,
+        bodyText: bodyHtml.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n')
+                          .replace(/<[^>]+>/g, '').replace(/\n{3,}/g, '\n\n').trim(),
+        adminUrl: `https://app.kajabi.com/admin/event_actions/${id}/edit`,
+      });
+    }
+
+    const mins = (e) => {
+      const n = parseInt(e.interval, 10) || 0;
+      const mult = e.unit === 'days' ? 1440 : e.unit === 'hours' ? 60 : 1;
+      return (e.orientation === 'before' ? -1 : 1) * n * mult;
+    };
+    out.sort((a, b) => mins(a) - mins(b));
+
+    if (args.json) { print(out); return; }
+
+    if (args.out) {
+      const fs = await import('fs');
+      fs.mkdirSync(args.out, { recursive: true });
+      out.forEach((e, i) => {
+        const f = `${args.out}/${String(i + 1).padStart(2, '0')}-${e.id}.md`;
+        fs.writeFileSync(f,
+          `# ${e.subject}\n\n**When:** ${e.interval} ${e.unit} ${e.orientation} the event\n` +
+          `**Admin:** ${e.adminUrl}\n\n---\n\n${e.bodyText}\n`);
+      });
+      console.log(`Wrote ${out.length} file(s) to ${args.out}`);
+      return;
+    }
+
+    console.log(`\nEvent ${eventId} — ${out.length} attached email(s)\n`);
+    for (const e of out) {
+      console.log('='.repeat(72));
+      console.log(`[${e.id}]  ${e.interval} ${e.unit} ${e.orientation} the event`);
+      console.log(`SUBJECT: ${e.subject}`);
+      console.log(`ADMIN:   ${e.adminUrl}`);
+      console.log('-'.repeat(72));
+      console.log(e.bodyText);
+      console.log();
+    }
+  },
   async revenue(client, args) {
     if (args.export) {
       const data = await client.exportRevenue(dateRange(args));
@@ -484,6 +602,105 @@ const COMMANDS = {
     print(data);
   },
 
+  // ─── Landing Pages ───
+
+  async pages(client, args) {
+    if (args.all) {
+      const pages = await client.getAllLandingPages();
+      if (args.csv) {
+        console.log('id,slug,title');
+        for (const p of pages) {
+          console.log(`${p.id},/${p.slug || ''},${(p.title || '').replace(/,/g, '')}`);
+        }
+      } else if (args.json) {
+        print(pages);
+      } else {
+        console.log(`${pages.length} landing pages:\n`);
+        const maxSlug = Math.max(...pages.map(p => (p.slug || '').length), 4);
+        for (const p of pages) {
+          const slug = ('/' + (p.slug || '')).padEnd(maxSlug + 2);
+          console.log(`  ${p.id}  ${slug}  ${p.title || ''}`);
+        }
+      }
+    } else {
+      const pageNum = parseInt(args.page) || 1;
+      const result = await client.getLandingPages({ page: pageNum });
+      console.log(`Page ${pageNum} of ${result.totalPages} (${result.pages.length} pages):\n`);
+      const maxSlug = Math.max(...result.pages.map(p => (p.slug || '').length), 4);
+      for (const p of result.pages) {
+        const slug = ('/' + (p.slug || '')).padEnd(maxSlug + 2);
+        console.log(`  ${p.id}  ${slug}  ${p.title || ''}`);
+      }
+      if (result.totalPages > 1) {
+        console.log(`\nUse --all to list all pages, or --page=N to paginate.`);
+      }
+    }
+  },
+
+  async 'pages-delete'(client, args) {
+    const targets = args._.slice(1);
+    const id = args.id;
+    const slug = args.slug;
+    const dryRun = args['dry-run'] || args.dry;
+
+    if (!id && !slug && targets.length === 0) {
+      console.error('Usage: kajabi pages-delete --slug=confirmation-page [--dry-run]');
+      console.error('       kajabi pages-delete --id=2151809954');
+      console.error('       kajabi pages-delete confirmation-page blank-page  (match by slug substring)');
+      process.exit(1);
+    }
+
+    const allPages = await client.getAllLandingPages();
+    const toDelete = [];
+
+    if (id) {
+      const page = allPages.find(p => p.id === id);
+      if (page) toDelete.push(page);
+      else { console.error(`No page found with ID ${id}`); process.exit(1); }
+    } else {
+      const slugs = slug ? [slug] : targets;
+      for (const s of slugs) {
+        const clean = s.replace(/^\//, '');
+        const matches = allPages.filter(p => p.slug === clean || (p.slug && p.slug.includes(clean)));
+        if (matches.length === 0) {
+          console.error(`No page matching "${s}" — skipping`);
+        } else {
+          toDelete.push(...matches);
+        }
+      }
+    }
+
+    if (toDelete.length === 0) {
+      console.log('No pages to delete.');
+      return;
+    }
+
+    console.log(`\n${dryRun ? '[DRY RUN] ' : ''}Deleting ${toDelete.length} page(s):\n`);
+    for (const p of toDelete) {
+      console.log(`  ${p.id}  /${p.slug}  ${p.title}`);
+    }
+    console.log();
+
+    if (dryRun) {
+      console.log('Dry run — no pages were deleted. Remove --dry-run to delete.');
+      return;
+    }
+
+    let deleted = 0;
+    let failed = 0;
+    for (const p of toDelete) {
+      try {
+        await client.deleteLandingPage(p.id);
+        console.log(`  ✓ Deleted /${p.slug} (${p.id})`);
+        deleted++;
+      } catch (err) {
+        console.error(`  ✗ Failed /${p.slug}: ${err.message}`);
+        failed++;
+      }
+    }
+    console.log(`\nDone: ${deleted} deleted${failed ? `, ${failed} failed` : ''}`);
+  },
+
   // ─── Email Drafting ───
 
   async 'email-draft'(client, args) {
@@ -697,6 +914,7 @@ Commands:
                    (--start= --end=, --all, --csv, --output=file.csv, --json)
                    (--page=N, --period=30_days|90_days|12_months, --offer=ID)
   payments-by-offer  Revenue grouped by offer (--start/--end, --csv)
+  event-emails       Read reminder emails attached to an EVENT (--event=ID, --json, --out=DIR)
   revenue          Revenue report (--start/--end, --csv, --export)
   refunds          Refunds report (--start/--end, --csv)
   offers-sold      Offers sold report (--start/--end, --csv)
@@ -714,11 +932,16 @@ Commands:
   blog-update      Update an existing blog post
                    (--id= --title= --body-file= --slug= --publish --unpublish)
   blog-tags        List available blog tags
+  pages            List landing pages (--all, --page=N, --csv, --json)
+  pages-delete     Delete landing pages by slug or ID
+                   (--slug= --id= --dry-run, or pass slugs as args)
   email-draft      Create email broadcast draft + open in browser
                    (--title= --subject= --body-file=path/to/body.html)
   newsletter       Newsletter config
   site             Site info
   token            Print current JWT token (debug)
+  refresh          Unattended-safe session refresh (no browser popup needed
+                   unless a real 2FA login is due — see KAJABI_LOGIN_TIMEOUT_MS)
   config           View or set configuration
                    (--site-id=XXXXXXX --email=you@example.com)
 
